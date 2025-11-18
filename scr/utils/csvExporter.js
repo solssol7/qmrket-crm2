@@ -1,6 +1,3 @@
-/**
- * CSV 다운로드
- */
 export const exportToCSV = (data, filename) => {
   if (!window.Papa) {
     throw new Error('Papa Parse 라이브러리가 로드되지 않았습니다');
