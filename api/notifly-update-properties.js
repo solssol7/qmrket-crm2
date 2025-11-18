@@ -1,17 +1,6 @@
 // api/notifly-update-properties.js
-/**
- * Notifly 사용자 속성 업데이트 API
- * 
- * POST /api/notifly-update-properties
- * {
- *   "projectId": "...",
- *   "users": [
- *     { "userId": "...", "userProperties": { "key": "value" } }
- *   ]
- * }
- */
 
-const handler = async (req, res) => {
+export default async (req, res) => {
   // CORS 설정
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -56,7 +45,7 @@ const handler = async (req, res) => {
 
     // 2. 속성 업데이트
     const updateRes = await fetch(
-      `https://api.notifly.tech/set-user-properties`,
+      'https://api.notifly.tech/set-user-properties',
       {
         method: 'POST',
         headers: {
@@ -87,5 +76,3 @@ const handler = async (req, res) => {
     });
   }
 };
-
-export default handler;
