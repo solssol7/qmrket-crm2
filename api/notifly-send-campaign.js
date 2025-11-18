@@ -1,16 +1,6 @@
 // api/notifly-send-campaign.js
-/**
- * Notifly 캠페인 발송 API
- * 
- * POST /api/notifly-send-campaign
- * {
- *   "projectId": "...",
- *   "campaignId": "...",
- *   "users": [...]
- * }
- */
 
-const handler = async (req, res) => {
+export default async (req, res) => {
   // CORS 설정
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -86,5 +76,3 @@ const handler = async (req, res) => {
     });
   }
 };
-
-export default handler;
