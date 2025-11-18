@@ -1,10 +1,7 @@
-import { updateUserProperties } from '../api/notifly.js';
+import { updateUserProperties, getNotiflyToken } from '../api/notifly.js';
 import { logger } from '../utils/logger.js';
 import { BATCH_SIZES } from '../config/constants.js';
 
-/**
- * 사용자 속성 배치 업데이트
- */
 export const updateUserPropertiesBatch = async (propertyName, propertyValue, userIds) => {
   if (!propertyName || !propertyValue) {
     throw new Error('속성 이름과 값이 필요합니다');
@@ -13,6 +10,9 @@ export const updateUserPropertiesBatch = async (propertyName, propertyValue, use
   if (!userIds || userIds.length === 0) {
     throw new Error('사용자 ID가 필요합니다');
   }
+
+  const token = await getNotiflyToken();
+  logger.info('Notifly 인증 완료');
 
   let totalUpdated = 0;
 
@@ -24,12 +24,11 @@ export const updateUserPropertiesBatch = async (propertyName, propertyValue, use
     try {
       logger.info(`배치 ${batchNum}/${totalBatches} 업데이트 중... (${batch.length}명)`);
       
-      await updateUserProperties(propertyName, propertyValue, batch);
+      await updateUserProperties(propertyName, propertyValue, batch, token);
       
       totalUpdated += batch.length;
       logger.success(`배치 ${batchNum} 업데이트 완료 ✓`);
 
-      // Rate limit 방지
       if (i + BATCH_SIZES.PROPERTIES < userIds.length) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
