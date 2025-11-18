@@ -50,23 +50,61 @@ export const enrichUserData = (user, orderStats, couponMap) => {
   };
 };
 
-export const matchCustomSegment = (user, conditions, stats, daysSinceSignup, daysSinceOrder, avgCycle, couponCount) => {
-  let match = true;
+/**
+ * 세그먼트 분류 로직 (수정 용이!)
+ */
+export const classifySegments = (enriched, stats, daysSinceOrder, daysSinceSignup, recentOrders, avgOrderAmount, couponCount) => {
+  const segments = [];
+  const totalAmount = enriched.누적구매액;
+  const orderCount = enriched.총주문횟수;
 
-  if (conditions.martEnabled && !user.mart_is_enabled) match = false;
-  if (conditions.signupDaysMin && daysSinceSignup < parseInt(conditions.signupDaysMin)) match = false;
-  if (conditions.signupDaysMax && daysSinceSignup > parseInt(conditions.signupDaysMax)) match = false;
-  if (conditions.totalAmountMin && stats.totalAmount < parseInt(conditions.totalAmountMin)) match = false;
-  if (conditions.totalAmountMax && stats.totalAmount > parseInt(conditions.totalAmountMax)) match = false;
-  if (conditions.orderCountMin && stats.orders.length < parseInt(conditions.orderCountMin)) match = false;
-  if (conditions.orderCountMax && stats.orders.length > parseInt(conditions.orderCountMax)) match = false;
-  if (conditions.grade && user.grade_name !== conditions.grade) match = false;
-  if (conditions.avgCycleMin && avgCycle < parseInt(conditions.avgCycleMin)) match = false;
-  if (conditions.avgCycleMax && avgCycle > parseInt(conditions.avgCycleMax)) match = false;
-  if (conditions.daysSinceOrderMin && daysSinceOrder < parseInt(conditions.daysSinceOrderMin)) match = false;
-  if (conditions.daysSinceOrderMax && daysSinceOrder > parseInt(conditions.daysSinceOrderMax)) match = false;
-  if (conditions.couponCountMin && couponCount < parseInt(conditions.couponCountMin)) match = false;
-  if (conditions.couponCountMax && couponCount > parseInt(conditions.couponCountMax)) match = false;
+  // 신규 고객
+  if (daysSinceSignup <= 30) {
+    if (orderCount === 0) {
+      segments.push('신규_미구매');
+    } else if (orderCount === 1) {
+      segments.push('신규_1회구매');
+    } else {
+      segments.push('신규_2회이상');
+    }
+  }
 
-  return match;
+  // 휴면 고객
+  if (daysSinceOrder >= 60) {
+    if (totalAmount >= 200000) {
+      segments.push('고가치_휴면');
+    } else if (totalAmount >= 100000) {
+      segments.push('중가치_휴면');
+    } else {
+      segments.push('저가치_휴면');
+    }
+  }
+
+  // 활성 고객
+  if (daysSinceOrder < 60) {
+    if (recentOrders.length >= 5 && avgOrderAmount >= 50000) {
+      segments.push('VIP');
+    } else if (recentOrders.length >= 3) {
+      segments.push('충성고객');
+    } else {
+      segments.push('일반활성');
+    }
+
+    if (couponCount >= 3 && recentOrders.every(o => !o.coupon_payment || o.coupon_payment === 0)) {
+      segments.push('쿠폰미사용_활성');
+    }
+  }
+
+  // RFM
+  if (daysSinceOrder <= 30 && orderCount >= 5 && totalAmount >= 500000) {
+    segments.push('RFM_Champions');
+  } else if (daysSinceOrder <= 60 && orderCount >= 3 && totalAmount >= 300000) {
+    segments.push('RFM_LoyalCustomers');
+  } else if (daysSinceOrder >= 60 && daysSinceOrder <= 90 && totalAmount >= 200000) {
+    segments.push('RFM_AtRisk');
+  } else if (daysSinceOrder > 90 && totalAmount >= 500000) {
+    segments.push('RFM_CantLose');
+  }
+
+  return [...new Set(segments)];
 };
