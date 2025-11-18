@@ -1,12 +1,9 @@
-/**
- * 중앙 로깅 시스템
- */
 export const logger = {
   logs: [],
 
   log(message, type = 'info') {
-    const timestamp = new Date().toLocaleTimeString();
-    const entry = { message, type, timestamp };
+    const time = new Date().toLocaleTimeString();
+    const entry = { message, type, time };
     this.logs.push(entry);
     console.log(`[${type.toUpperCase()}] ${message}`);
     return entry;
