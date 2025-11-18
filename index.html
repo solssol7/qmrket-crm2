@@ -1,577 +1,532 @@
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>큐마켓 CRM</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <title>큐마켓 CRM 세그먼트 대시보드</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/papaparse@5/papaparse.min.js"></script>
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel">
-    import React, { useState, useEffect } from 'react';
-import { Upload, Download, Send, Users, AlertCircle, CheckCircle, Loader, RefreshCw } from 'lucide-react';
-import Papa from 'papaparse';
-import { createClient } from '@supabase/supabase-js';
 
-// Supabase 설정
-const supabase = createClient(
-  'https://htcxkbijmiptoubmkhkm.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0Y3hrYmlqbWlwdG91Ym1raGttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MjA2OTcsImV4cCI6MjA3ODk5NjY5N30.JGTUpL5spuYEvXdI3u3f3qboS6n2ztGSVwHrZijB4i8'
-);
+  <script type="module">
+    // ========================================
+    // 📥 모든 모듈 import
+    // ========================================
 
-const NOTIFLY_CONFIG = {
-  PROJECT_ID: 'f2e198e2448959908fe4f8e540f4057f',
-};
+    import { PREDEFINED_SEGMENTS, NOTIFLY_CONFIG, CUSTOM_SEGMENT_TEMPLATE, BATCH_SIZES } from './src/config/constants.js';
+    import { supabase } from './src/config/supabase.js';
+    import { fetchAllUsers, fetchAllOrders, fetchAllCoupons, fetchDatabaseStats, fetchCustomSegments, saveCustomSegment, deleteCustomSegment } from './src/api/database.js';
+    import { getNotiflyToken } from './src/api/notifly.js';
+    import { analyzeSegments } from './src/services/segmentService.js';
+    import { sendCampaignBatch, sendTestCampaign } from './src/services/campaignService.js';
+    import { updateUserPropertiesBatch } from './src/services/propertyService.js';
+    import { logger } from './src/utils/logger.js';
+    import { exportToCSV } from './src/utils/csvExporter.js';
 
-const CRMDashboard = () => {
-  const [segments, setSegments] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const [uploadProgress, setUploadProgress] = useState({ users: 0, orders: 0, coupons: 0 });
-  const [dbStats, setDbStats] = useState({ users: 0, orders: 0, coupons: 0 });
-  const [selectedSegment, setSelectedSegment] = useState(null);
-  const [campaignId, setCampaignId] = useState('');
+    const { useState, useEffect } = React;
 
-  const addLog = (message, type = 'info') => {
-    setLogs(prev => [...prev, { message, type, time: new Date().toLocaleTimeString() }]);
-  };
+    // ========================================
+    // 🎨 React 컴포넌트
+    // ========================================
 
-  // DB 통계 조회
-  const loadDbStats = async () => {
-    try {
-      const [usersCount, ordersCount, couponsCount] = await Promise.all([
-        supabase.from('users').select('*', { count: 'exact', head: true }),
-        supabase.from('orders').select('*', { count: 'exact', head: true }),
-        supabase.from('coupons').select('*', { count: 'exact', head: true })
-      ]);
+    const SegmentCard = ({ name, users, info, onDownloadCSV, onUpdateProperties, onSendCampaign, onSendTest, propertyName, propertyValue, campaignId, testUserIds, onPropertyNameChange, onPropertyValueChange, onCampaignIdChange, onTestUserIdsChange, isCustom, onDelete }) => {
+      if (!users || users.length === 0) return null;
 
-      setDbStats({
-        users: usersCount.count || 0,
-        orders: ordersCount.count || 0,
-        coupons: couponsCount.count || 0
-      });
-    } catch (error) {
-      addLog(`DB 통계 조회 실패: ${error.message}`, 'error');
-    }
-  };
+      const pushUsers = users.filter(u => u.푸시가능).length;
+      const smsUsers = users.filter(u => u.SMS가능).length;
+      const alimtalkUsers = users.filter(u => u.알림톡가능).length;
 
-  useEffect(() => {
-    loadDbStats();
-  }, []);
+      return (
+        <div className="bg-white rounded-lg shadow p-4 hover:shadow-lg transition">
+          <div className="mb-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg">
+                {name} <span className="text-orange-600">({users.length.toLocaleString()}명)</span>
+              </h3>
+              {isCustom && (
+                <button
+                  onClick={() => onDelete(name)}
+                  className="text-red-500 text-sm hover:text-red-700"
+                >
+                  🗑️ 삭제
+                </button>
+              )}
+            </div>
+            {info && (
+              <div className="text-xs text-gray-600 mt-1">
+                <div className="font-medium">📋 {info.conditions}</div>
+                {info.description && <div className="text-gray-500 mt-0.5">{info.description}</div>}
+              </div>
+            )}
+            <div className="text-xs text-gray-500 mt-1">
+              📱 푸시: {pushUsers.toLocaleString()}명 | 💬 SMS: {smsUsers.toLocaleString()}명 | 💌 알림톡: {alimtalkUsers.toLocaleString()}명
+            </div>
+          </div>
 
-  // agree 필드 boolean 변환 헬퍼
-  const parseAgree = (value) => {
-    if (value === 'true' || value === true) return true;
-    if (value === 'false' || value === false) return false;
-    return false; // null이나 빈 값은 false로 처리
-  };
+          {/* CSV 다운로드 */}
+          <div className="mb-3">
+            <button
+              onClick={() => onDownloadCSV(name)}
+              className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600 text-sm transition font-medium"
+            >
+              📥 CSV 다운로드
+            </button>
+          </div>
 
-  // CSV 업로드 → Supabase 저장
-  const handleFileUpload = async (file, type) => {
-    Papa.parse(file, {
-      header: true,
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: async (result) => {
-        const cleanData = result.data.map(row => {
-          const cleaned = {};
-          Object.keys(row).forEach(key => {
-            cleaned[key.trim()] = row[key];
-          });
-          return cleaned;
-        });
+          {/* 속성 업데이트 */}
+          <div className="mb-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div className="text-xs font-bold text-blue-900 mb-2">🏷️ 속성 업데이트</div>
+            <div className="grid grid-cols-12 gap-2">
+              <input
+                type="text"
+                placeholder="속성명 (예: 마케팅_세그먼트)"
+                value={propertyName || ''}
+                onChange={(e) => onPropertyNameChange(name, e.target.value)}
+                className="col-span-5 border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text"
+                placeholder="속성값 (예: 고가치_휴면)"
+                value={propertyValue || ''}
+                onChange={(e) => onPropertyValueChange(name, e.target.value)}
+                className="col-span-5 border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => onUpdateProperties(name)}
+                disabled={!propertyName || !propertyValue}
+                className="col-span-2 bg-blue-500 text-white py-1.5 rounded hover:bg-blue-600 disabled:bg-gray-300 text-xs transition font-medium"
+              >
+                ✅ 업데이트
+              </button>
+            </div>
+          </div>
 
-        addLog(`${type} CSV 읽기 완료: ${cleanData.length}행`, 'info');
-
-        try {
-          setLoading(true);
-          
-          if (type === 'users') {
-            // 기존 데이터 삭제
-            await supabase.from('users').delete().neq('user_id', 0);
+          {/* 캠페인 발송 */}
+          <div className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+            <div className="text-xs font-bold text-purple-900 mb-2">📨 캠페인 발송</div>
             
-            // 새 데이터 삽입 (500개씩 배치)
-            const batchSize = 500;
-            for (let i = 0; i < cleanData.length; i += batchSize) {
-              const batch = cleanData.slice(i, i + batchSize);
-              const { error } = await supabase.from('users').insert(batch);
-              if (error) throw error;
-              setUploadProgress(prev => ({ ...prev, users: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
-            }
-            addLog(`✓ users 테이블에 ${cleanData.length}행 저장 완료`, 'success');
-            
-          } else if (type === 'orders') {
-            await supabase.from('orders').delete().neq('user_id', 0);
-            
-            const batchSize = 500;
-            for (let i = 0; i < cleanData.length; i += batchSize) {
-              const batch = cleanData.slice(i, i + batchSize);
-              const { error } = await supabase.from('orders').insert(batch);
-              if (error) throw error;
-              setUploadProgress(prev => ({ ...prev, orders: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
-            }
-            addLog(`✓ orders 테이블에 ${cleanData.length}행 저장 완료`, 'success');
-            
-          } else if (type === 'coupons') {
-            await supabase.from('coupons').delete().neq('user_id', 0);
-            
-            const batchSize = 500;
-            for (let i = 0; i < cleanData.length; i += batchSize) {
-              const batch = cleanData.slice(i, i + batchSize);
-              const { error } = await supabase.from('coupons').insert(batch);
-              if (error) throw error;
-              setUploadProgress(prev => ({ ...prev, coupons: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
-            }
-            addLog(`✓ coupons 테이블에 ${cleanData.length}행 저장 완료`, 'success');
+            <div className="mb-2">
+              <input
+                type="text"
+                placeholder="캠페인 ID (예: RzpI2K)"
+                value={campaignId || ''}
+                onChange={(e) => onCampaignIdChange(name, e.target.value)}
+                className="w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              <input
+                type="text"
+                placeholder="테스트 User ID (쉼표구분)"
+                value={testUserIds || ''}
+                onChange={(e) => onTestUserIdsChange(name, e.target.value)}
+                className="col-span-2 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                title="예: 13,381,489"
+              />
+              <button
+                onClick={() => onSendTest(name)}
+                disabled={!campaignId || !testUserIds}
+                className="bg-yellow-500 text-white py-1 rounded hover:bg-yellow-600 disabled:bg-gray-300 text-xs transition font-medium"
+              >
+                🧪 테스트
+              </button>
+            </div>
+
+            <button
+              onClick={() => onSendCampaign(name)}
+              disabled={!campaignId}
+              className="w-full bg-purple-600 text-white py-2 rounded hover:bg-purple-700 disabled:bg-gray-300 text-sm transition font-bold"
+            >
+              📨 전체 발송 ({pushUsers.toLocaleString()}명)
+            </button>
+          </div>
+        </div>
+      );
+    };
+
+    const Dashboard = () => {
+      const [activeTab, setActiveTab] = useState('predefined');
+      const [activeCategory, setActiveCategory] = useState('휴면');
+      const [segments, setSegments] = useState(null);
+      const [customSegs, setCustomSegs] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [dbStats, setDbStats] = useState({ users: 0, orders: 0, coupons: 0 });
+      const [campaignIds, setCampaignIds] = useState({});
+      const [testUserIds, setTestUserIds] = useState({});
+      const [propertyNames, setPropertyNames] = useState({});
+      const [propertyValues, setPropertyValues] = useState({});
+      const [newSegment, setNewSegment] = useState(JSON.parse(JSON.stringify(CUSTOM_SEGMENT_TEMPLATE)));
+      const [allUsers, setAllUsers] = useState([]);
+
+      // DB 통계 로드
+      useEffect(() => {
+        const loadStats = async () => {
+          try {
+            const stats = await fetchDatabaseStats();
+            setDbStats(stats);
+            logger.info(`DB 통계 로드 완료: Users ${stats.users}명`);
+          } catch (error) {
+            logger.error(`통계 로드 실패: ${error.message}`);
           }
+        };
+        
+        const loadCustomSegs = async () => {
+          try {
+            const data = await fetchCustomSegments();
+            setCustomSegs(data || []);
+            logger.info(`커스텀 세그먼트 ${data?.length || 0}개 로드`);
+          } catch (error) {
+            logger.error(`커스텀 세그먼트 로드 실패: ${error.message}`);
+          }
+        };
 
-          await loadDbStats();
+        logger.info('대시보드 초기화 중...');
+        loadStats();
+        loadCustomSegs();
+      }, []);
+
+      const analyzeAndClassify = async () => {
+        setLoading(true);
+        try {
+          const result = await analyzeSegments((progress) => {
+            logger.info(`분석 진행률: ${progress}%`);
+          });
+          setSegments(result.segments);
+          setCustomSegs(result.customSegs);
+          
+          // allUsers 저장
+          const users = await fetchAllUsers();
+          setAllUsers(users);
         } catch (error) {
-          addLog(`DB 저장 실패: ${error.message}`, 'error');
+          logger.error(`분석 실패: ${error.message}`);
         } finally {
           setLoading(false);
         }
-      },
-      error: (error) => {
-        addLog(`CSV 읽기 실패: ${error.message}`, 'error');
-      }
-    });
-  };
-
-  // Supabase에서 데이터 조회 & 세그먼트 분석
-  const analyzeSegments = async () => {
-    setLoading(true);
-    addLog('DB에서 데이터 조회 중...', 'info');
-
-    try {
-      // 모든 데이터 조회
-      const [usersRes, ordersRes, couponsRes] = await Promise.all([
-        supabase.from('users').select('*'),
-        supabase.from('orders').select('*'),
-        supabase.from('coupons').select('*')
-      ]);
-
-      if (usersRes.error) throw usersRes.error;
-      if (ordersRes.error) throw ordersRes.error;
-      if (couponsRes.error) throw couponsRes.error;
-
-      const users = usersRes.data;
-      const orders = ordersRes.data;
-      const coupons = couponsRes.data;
-
-      addLog(`데이터 조회 완료: users ${users.length}명, orders ${orders.length}건`, 'info');
-
-      // 주문 데이터 집계
-      const orderStats = {};
-      orders.forEach(order => {
-        const uid = order.user_id;
-        if (!orderStats[uid]) {
-          orderStats[uid] = { orders: [], totalAmount: 0, lastOrderDate: null };
-        }
-        orderStats[uid].orders.push(order);
-        orderStats[uid].totalAmount += (order.real_payment || 0) + (order.qmoney_payment || 0);
-        
-        const orderDate = new Date(order.order_date);
-        if (!orderStats[uid].lastOrderDate || orderDate > orderStats[uid].lastOrderDate) {
-          orderStats[uid].lastOrderDate = orderDate;
-        }
-      });
-
-      // 쿠폰 데이터 매핑
-      const couponMap = {};
-      coupons.forEach(c => {
-        couponMap[c.user_id] = c.valid_coupon_count || 0;
-      });
-
-      const now = new Date();
-      const segments = {
-        '고가치_휴면': [],
-        '중가치_휴면': [],
-        '저가치_휴면': [],
-        'VIP': [],
-        '충성고객': [],
-        '일반활성': [],
-        '신규유저': [],
-        '쿠폰미사용_활성': []
       };
 
-      users.forEach(user => {
-        const uid = user.user_id;
-        const stats = orderStats[uid] || { orders: [], totalAmount: 0, lastOrderDate: null };
-        const couponCount = couponMap[uid] || 0;
-        const signupDate = new Date(user.signup_date);
-        const daysSinceSignup = (now - signupDate) / (1000 * 60 * 60 * 24);
-        const daysSinceOrder = stats.lastOrderDate ? (now - stats.lastOrderDate) / (1000 * 60 * 60 * 24) : 999;
+      const handleDownloadCSV = (segmentName) => {
+        if (!segments || !segments[segmentName]) return;
+        exportToCSV(segments[segmentName], segmentName);
+        logger.success(`${segmentName} CSV 다운로드`);
+      };
+
+      const handleUpdateProperties = async (segmentName) => {
+        const propertyName = propertyNames[segmentName];
+        const propertyValue = propertyValues[segmentName];
         
-        const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-        const recentOrders = stats.orders.filter(o => new Date(o.order_date) >= threeMonthsAgo);
-        const recentAmount = recentOrders.reduce((sum, o) => sum + (o.real_payment || 0) + (o.qmoney_payment || 0), 0);
-        const avgOrderAmount = recentOrders.length > 0 ? recentAmount / recentOrders.length : 0;
-
-        const enriched = {
-          ...user,
-          총주문횟수: stats.orders.length,
-          누적구매액: stats.totalAmount,
-          최근주문일: stats.lastOrderDate ? stats.lastOrderDate.toISOString().split('T')[0] : 'N/A',
-          미주문일수: Math.floor(daysSinceOrder),
-          최근3개월주문: recentOrders.length,
-          최근3개월구매액: recentAmount,
-          평균주문금액: Math.floor(avgOrderAmount),
-          보유쿠폰: couponCount,
-          // 발송 가능 채널
-          푸시가능: parseAgree(user.agree_app_push),
-          SMS가능: parseAgree(user.agree_sms),
-          알림톡가능: parseAgree(user.agree_alim_talk)
-        };
-
-        // MECE 세그먼트 분류
-        if (daysSinceSignup <= 30 && stats.orders.length <= 1) {
-          segments['신규유저'].push({ ...enriched, 세그먼트: '신규유저' });
-        } else if (daysSinceOrder >= 60) {
-          if (stats.totalAmount >= 200000 && couponCount >= 3) {
-            segments['고가치_휴면'].push({ ...enriched, 세그먼트: '고가치_휴면' });
-          } else if (stats.totalAmount >= 100000 && couponCount >= 1) {
-            segments['중가치_휴면'].push({ ...enriched, 세그먼트: '중가치_휴면' });
-          } else {
-            segments['저가치_휴면'].push({ ...enriched, 세그먼트: '저가치_휴면' });
-          }
-        } else {
-          if (recentOrders.length >= 5 && avgOrderAmount >= 50000) {
-            segments['VIP'].push({ ...enriched, 세그먼트: 'VIP' });
-          } else if (recentOrders.length >= 3) {
-            segments['충성고객'].push({ ...enriched, 세그먼트: '충성고객' });
-          } else {
-            segments['일반활성'].push({ ...enriched, 세그먼트: '일반활성' });
-          }
-
-          if (couponCount >= 3 && recentOrders.every(o => !o.coupon_payment || o.coupon_payment === 0)) {
-            segments['쿠폰미사용_활성'].push({ ...enriched, 세그먼트: '쿠폰미사용_활성' });
-          }
+        if (!propertyName || !propertyValue) {
+          logger.error('속성명과 속성값을 모두 입력해주세요');
+          alert('❌ 입력 오류\n\n속성명과 속성값을 모두 입력해주세요.');
+          return;
         }
-      });
+        
+        const users = segments[segmentName];
+        const confirmMessage = `⚠️ 유저 속성 업데이트
+━━━━━━━━━━━━━━━━━━━━━
+📊 세그먼트: ${segmentName}
+👥 대상 인원: ${users.length.toLocaleString()}명
+🏷️ 속성명: ${propertyName}
+📝 속성값: ${propertyValue}
 
-      setSegments(segments);
-      addLog('세그먼트 분석 완료!', 'success');
-    } catch (error) {
-      addLog(`분석 실패: ${error.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
+⚠️ 이 작업은 Notifly에 데이터를 전송합니다.
 
-  // CSV 다운로드
-  const downloadCSV = (segmentName) => {
-    if (!segments || !segments[segmentName]) return;
+계속하시겠습니까?`;
 
-    const data = segments[segmentName];
-    const csv = Papa.unparse(data);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${segmentName}_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    addLog(`${segmentName} CSV 다운로드 (${data.length}명)`, 'success');
-  };
+        if (!confirm(confirmMessage)) return;
 
-  // Notifly 유저 속성 업데이트
-  const updateUserProperties = async (segmentName) => {
-    if (!segments || !segments[segmentName]) return;
+        try {
+          const userIds = users.map(u => u.user_id);
+          const result = await updateUserPropertiesBatch(propertyName, propertyValue, userIds);
+          logger.success(`✓ 속성 업데이트 완료 (${result.totalUpdated}명)`);
+          alert(`✅ 성공!\n\n업데이트 완료: ${result.totalUpdated.toLocaleString()}/${result.totalUsers.toLocaleString()}명`);
+        } catch (error) {
+          logger.error(`속성 업데이트 실패: ${error.message}`);
+          alert(`❌ 오류 발생\n\n${error.message}`);
+        }
+      };
 
-    const users = segments[segmentName];
-    addLog(`${segmentName} 유저 속성 업데이트 시작 (${users.length}명)`, 'info');
+      const handleSendCampaign = async (segmentName) => {
+        const campaignId = campaignIds[segmentName];
+        if (!segments || !segments[segmentName] || !campaignId) {
+          logger.error('캠페인 ID를 입력해주세요');
+          return;
+        }
 
-    try {
-      // Vercel Serverless Function 호출
-      const response = await fetch('/api/notifly-update-properties', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: NOTIFLY_CONFIG.PROJECT_ID,
-          users: users.map(user => ({
-            userId: String(user.user_id),
-            properties: {
-              $phone_number: user.phone,
-              세그먼트: user.세그먼트,
-              등급: user.grade_name,
-              마트: user.mart_name,
-              총주문횟수: user.총주문횟수,
-              누적구매액: user.누적구매액,
-              최근주문일: user.최근주문일,
-              미주문일수: user.미주문일수,
-              보유쿠폰: user.보유쿠폰
-            }
-          }))
-        })
-      });
+        const users = segments[segmentName].filter(u => u.푸시가능);
+        
+        if (users.length === 0) {
+          logger.error('발송 가능한 유저가 없습니다');
+          alert('❌ 발송 불가\n\n푸시 동의한 유저가 없습니다.');
+          return;
+        }
 
-      const result = await response.json();
-      if (result.success) {
-        addLog(`✓ ${segmentName} 속성 업데이트 완료`, 'success');
-      } else {
-        addLog(`속성 업데이트 실패: ${result.error}`, 'error');
-      }
-    } catch (error) {
-      addLog(`속성 업데이트 실패: ${error.message}`, 'error');
-    }
-  };
+        const confirmMessage = `🚨 캠페인 전체 발송
+━━━━━━━━━━━━━━━━━━━━━
+📊 세그먼트: ${segmentName}
+📨 캠페인 ID: ${campaignId}
+👥 발송 대상: ${users.length.toLocaleString()}명
 
-  // Notifly 캠페인 발송
-  const sendCampaign = async (segmentName) => {
-    if (!segments || !segments[segmentName] || !campaignId) {
-      addLog('캠페인 ID를 입력해주세요', 'error');
-      return;
-    }
+⚠️ 실제 발송이 진행됩니다!
 
-    // 발송 가능 유저만 필터링 (푸시 동의자)
-    const users = segments[segmentName].filter(u => u.푸시가능);
-    
-    if (users.length === 0) {
-      addLog('발송 가능한 유저가 없습니다 (푸시 동의 필요)', 'error');
-      return;
-    }
+정말 발송하시겠습니까?`;
 
-    addLog(`${segmentName} 캠페인 발송 시작 (${users.length}명)`, 'info');
+        if (!confirm(confirmMessage)) return;
+        if (!confirm(`⚠️ 최종 확인\n\n${users.length.toLocaleString()}명에게 즉시 발송됩니다.\n진행하시겠습니까?`)) return;
 
-    try {
-      const response = await fetch('/api/notifly-send-campaign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: NOTIFLY_CONFIG.PROJECT_ID,
-          campaignId: campaignId,
-          users: users.map(user => ({
-            userId: String(user.user_id),
-            eventParams: {
-              닉네임: user.nickname,
-              보유쿠폰: user.보유쿠폰,
-              미주문일수: user.미주문일수
-            }
-          }))
-        })
-      });
+        try {
+          const result = await sendCampaignBatch(campaignId, users);
+          logger.success(`✓ 캠페인 발송 완료 (${result.totalSent}명)`);
+          alert(`✅ 발송 완료!\n\n성공: ${result.totalSent.toLocaleString()}/${result.totalUsers.toLocaleString()}명`);
+        } catch (error) {
+          logger.error(`캠페인 발송 실패: ${error.message}`);
+          alert(`❌ 오류 발생\n\n${error.message}`);
+        }
+      };
 
-      const result = await response.json();
-      if (result.success) {
-        addLog(`✓ ${segmentName} 캠페인 발송 완료`, 'success');
-      } else {
-        addLog(`캠페인 발송 실패: ${result.error}`, 'error');
-      }
-    } catch (error) {
-      addLog(`캠페인 발송 실패: ${error.message}`, 'error');
-    }
-  };
+      const handleSendTest = async (segmentName) => {
+        const campaignId = campaignIds[segmentName];
+        const testIds = testUserIds[segmentName];
+        
+        if (!campaignId || !testIds) {
+          logger.error('캠페인 ID와 테스트 User ID를 입력해주세요');
+          alert('❌ 입력 오류');
+          return;
+        }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        {/* 헤더 */}
-        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-          <h1 className="text-3xl font-bold text-orange-600 mb-2">큐마켓 CRM 세그먼트 대시보드</h1>
-          <p className="text-gray-600">Supabase + Vercel 연동 | 실시간 동기화</p>
-        </div>
+        try {
+          const testUsers = await sendTestCampaign(campaignId, testIds, allUsers);
+          const testUserNames = testUsers.map(u => u.nickname || `유저${u.user_id}`).join(', ');
+          alert(`✅ 테스트 발송 완료!\n\n발송: ${testUsers.length}명\n대상: ${testUserNames}`);
+        } catch (error) {
+          logger.error(`테스트 발송 실패: ${error.message}`);
+          alert(`❌ 오류 발생\n\n${error.message}`);
+        }
+      };
 
-        {/* DB 통계 */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-500 mb-1">DB: Users</div>
-            <div className="text-2xl font-bold text-orange-600">{dbStats.users.toLocaleString()}명</div>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-500 mb-1">DB: Orders</div>
-            <div className="text-2xl font-bold text-blue-600">{dbStats.orders.toLocaleString()}건</div>
-          </div>
-          <div className="bg-white rounded-lg shadow p-4">
-            <div className="text-sm text-gray-500 mb-1">DB: Coupons</div>
-            <div className="text-2xl font-bold text-green-600">{dbStats.coupons.toLocaleString()}명</div>
-          </div>
-        </div>
+      const handleSaveCustomSegment = async () => {
+        if (!newSegment.name) {
+          logger.error('세그먼트 이름을 입력해주세요');
+          alert('❌ 입력 오류\n\n세그먼트 이름을 입력해주세요.');
+          return;
+        }
 
-        {/* CSV 업로드 */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-lg shadow p-4">
-            <label className="flex flex-col items-center cursor-pointer">
-              <Upload className="w-8 h-8 text-orange-500 mb-2" />
-              <span className="text-sm font-medium mb-2">기본정보 CSV</span>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => handleFileUpload(e.target.files[0], 'users')}
-                className="hidden"
-                disabled={loading}
-              />
-              <div className="text-xs text-gray-400 mt-1">
-                {uploadProgress.users > 0 ? `${uploadProgress.users.toFixed(0)}%` : '클릭하여 업로드'}
+        try {
+          await saveCustomSegment(newSegment.name, newSegment.conditions);
+          logger.success(`커스텀 세그먼트 "${newSegment.name}" 저장 완료`);
+          
+          const data = await fetchCustomSegments();
+          setCustomSegs(data || []);
+          
+          setNewSegment(JSON.parse(JSON.stringify(CUSTOM_SEGMENT_TEMPLATE)));
+          alert(`✅ 저장 완료!\n\n세그먼트: ${newSegment.name}`);
+        } catch (error) {
+          logger.error(`세그먼트 저장 실패: ${error.message}`);
+          alert(`❌ 오류 발생\n\n${error.message}`);
+        }
+      };
+
+      const handleDeleteCustomSegment = async (segmentName) => {
+        if (!confirm(`"${segmentName}" 세그먼트를 삭제하시겠습니까?`)) return;
+
+        try {
+          await deleteCustomSegment(segmentName);
+          logger.success(`세그먼트 "${segmentName}" 삭제 완료`);
+          
+          const data = await fetchCustomSegments();
+          setCustomSegs(data || []);
+          alert('✅ 삭제 완료!');
+        } catch (error) {
+          logger.error(`세그먼트 삭제 실패: ${error.message}`);
+          alert(`❌ 오류 발생\n\n${error.message}`);
+        }
+      };
+
+      const handleRefresh = async () => {
+        try {
+          const stats = await fetchDatabaseStats();
+          setDbStats(stats);
+          logger.success('DB 통계 새로고침 완료');
+        } catch (error) {
+          logger.error(`새로고침 실패: ${error.message}`);
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 p-6">
+          <div className="max-w-7xl mx-auto">
+            {/* 헤더 */}
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+              <h1 className="text-3xl font-bold text-orange-600 mb-2">🛒 큐마켓 CRM 세그먼트 대시보드</h1>
+              <p className="text-gray-600">
+                Supabase + Vercel 연동 | 실시간 동기화 | {dbStats.users.toLocaleString()}명 관리중
+              </p>
+            </div>
+
+            {/* 통계 패널 */}
+            <div className="grid grid-cols-3 gap-4 mb-6">
+              <div className="bg-white rounded-lg shadow p-4">
+                <div className="text-sm text-gray-500 mb-1">📊 DB: Users</div>
+                <div className="text-2xl font-bold text-orange-600">{dbStats.users.toLocaleString()}명</div>
               </div>
-            </label>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-4">
-            <label className="flex flex-col items-center cursor-pointer">
-              <Upload className="w-8 h-8 text-orange-500 mb-2" />
-              <span className="text-sm font-medium mb-2">주문정보 CSV</span>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => handleFileUpload(e.target.files[0], 'orders')}
-                className="hidden"
-                disabled={loading}
-              />
-              <div className="text-xs text-gray-400 mt-1">
-                {uploadProgress.orders > 0 ? `${uploadProgress.orders.toFixed(0)}%` : '클릭하여 업로드'}
+              <div className="bg-white rounded-lg shadow p-4">
+                <div className="text-sm text-gray-500 mb-1">🛍️ DB: Orders</div>
+                <div className="text-2xl font-bold text-blue-600">{dbStats.orders.toLocaleString()}건</div>
               </div>
-            </label>
-          </div>
-
-          <div className="bg-white rounded-lg shadow p-4">
-            <label className="flex flex-col items-center cursor-pointer">
-              <Upload className="w-8 h-8 text-orange-500 mb-2" />
-              <span className="text-sm font-medium mb-2">쿠폰정보 CSV</span>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={(e) => handleFileUpload(e.target.files[0], 'coupons')}
-                className="hidden"
-                disabled={loading}
-              />
-              <div className="text-xs text-gray-400 mt-1">
-                {uploadProgress.coupons > 0 ? `${uploadProgress.coupons.toFixed(0)}%` : '클릭하여 업로드'}
+              <div className="bg-white rounded-lg shadow p-4">
+                <div className="text-sm text-gray-500 mb-1">🎟️ DB: Coupons</div>
+                <div className="text-2xl font-bold text-green-600">{dbStats.coupons.toLocaleString()}건</div>
               </div>
-            </label>
-          </div>
-        </div>
+            </div>
 
-        {/* 분석 버튼 */}
-        <div className="flex gap-4 mb-6">
-          <button
-            onClick={analyzeSegments}
-            disabled={loading || dbStats.users === 0}
-            className="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {loading ? (
+            {/* 액션 버튼 */}
+            <div className="flex gap-4 mb-6">
+              <button
+                onClick={analyzeAndClassify}
+                disabled={loading || dbStats.users === 0}
+                className="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600 disabled:bg-gray-300 transition"
+              >
+                {loading ? '⏳ 분석 중... (30-60초 소요)' : '🎯 세그먼트 분석 시작'}
+              </button>
+
+              <button
+                onClick={handleRefresh}
+                className="bg-blue-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-600 transition"
+              >
+                🔄 새로고침
+              </button>
+            </div>
+
+            {/* 탭 및 세그먼트 표시 */}
+            {segments && (
               <>
-                <Loader className="w-5 h-5 animate-spin" />
-                분석 중...
-              </>
-            ) : (
-              <>
-                <Users className="w-5 h-5" />
-                세그먼트 분석 시작
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={loadDbStats}
-            className="bg-blue-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-600 flex items-center gap-2"
-          >
-            <RefreshCw className="w-5 h-5" />
-            새로고침
-          </button>
-        </div>
-
-        {/* 세그먼트 결과 */}
-        {segments && (
-          <div className="space-y-4 mb-6">
-            {Object.entries(segments).map(([name, users]) => {
-              const pushUsers = users.filter(u => u.푸시가능).length;
-              const smsUsers = users.filter(u => u.SMS가능).length;
-              const alimtalkUsers = users.filter(u => u.알림톡가능).length;
-
-              return (
-                <div key={name} className="bg-white rounded-lg shadow p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h3 className="font-bold text-lg">
-                        {name.replace('_', ' ')}
-                        <span className="ml-2 text-orange-600">({users.length}명)</span>
-                      </h3>
-                      <div className="text-xs text-gray-500 mt-1">
-                        푸시: {pushUsers}명 | SMS: {smsUsers}명 | 알림톡: {alimtalkUsers}명
-                      </div>
-                    </div>
-                    <Users className="w-5 h-5 text-gray-400" />
+                <div className="bg-white rounded-lg shadow mb-6">
+                  <div className="flex border-b">
+                    <button
+                      onClick={() => setActiveTab('predefined')}
+                      className={`flex-1 py-3 font-bold ${activeTab === 'predefined' ? 'bg-orange-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      📊 기본 세그먼트
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('custom')}
+                      className={`flex-1 py-3 font-bold ${activeTab === 'custom' ? 'bg-orange-500 text-white' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      ⚙️ 커스텀 세그먼트 ({customSegs.length})
+                    </button>
                   </div>
 
-                  {users.length > 0 && (
-                    <div className="grid grid-cols-4 gap-2">
-                      <button
-                        onClick={() => downloadCSV(name)}
-                        className="bg-green-500 text-white py-2 rounded hover:bg-green-600 flex items-center justify-center gap-2 text-sm"
-                      >
-                        <Download className="w-4 h-4" />
-                        CSV
-                      </button>
+                  {activeTab === 'predefined' && (
+                    <div className="p-6">
+                      <div className="flex gap-2 mb-4 flex-wrap">
+                        {Object.keys(PREDEFINED_SEGMENTS).map(category => (
+                          <button
+                            key={category}
+                            onClick={() => setActiveCategory(category)}
+                            className={`px-4 py-2 rounded-lg font-medium ${
+                              activeCategory === category
+                                ? 'bg-orange-500 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            {category}
+                          </button>
+                        ))}
+                      </div>
 
-                      <button
-                        onClick={() => updateUserProperties(name)}
-                        className="bg-blue-500 text-white py-2 rounded hover:bg-blue-600 flex items-center justify-center gap-2 text-sm"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        속성 업데이트
-                      </button>
-
-                      <input
-                        type="text"
-                        placeholder="캠페인 ID"
-                        value={selectedSegment === name ? campaignId : ''}
-                        onChange={(e) => {
-                          setSelectedSegment(name);
-                          setCampaignId(e.target.value);
-                        }}
-                        className="border rounded px-2 py-1 text-sm"
-                      />
-
-                      <button
-                        onClick={() => sendCampaign(name)}
-                        disabled={!campaignId || selectedSegment !== name}
-                        className="bg-purple-500 text-white py-2 rounded hover:bg-purple-600 disabled:bg-gray-300 flex items-center justify-center gap-2 text-sm"
-                      >
-                        <Send className="w-4 h-4" />
-                        발송
-                      </button>
+                      <div className="space-y-4">
+                        {PREDEFINED_SEGMENTS[activeCategory].map(seg => 
+                          <SegmentCard
+                            key={seg.name}
+                            name={seg.name}
+                            users={segments[seg.name]}
+                            info={seg}
+                            onDownloadCSV={handleDownloadCSV}
+                            onUpdateProperties={handleUpdateProperties}
+                            onSendCampaign={handleSendCampaign}
+                            onSendTest={handleSendTest}
+                            propertyName={propertyNames[seg.name]}
+                            propertyValue={propertyValues[seg.name]}
+                            campaignId={campaignIds[seg.name]}
+                            testUserIds={testUserIds[seg.name]}
+                            onPropertyNameChange={(name, value) => setPropertyNames({...propertyNames, [name]: value})}
+                            onPropertyValueChange={(name, value) => setPropertyValues({...propertyValues, [name]: value})}
+                            onCampaignIdChange={(name, value) => setCampaignIds({...campaignIds, [name]: value})}
+                            onTestUserIdsChange={(name, value) => setTestUserIds({...testUserIds, [name]: value})}
+                          />
+                        )}
+                      </div>
                     </div>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        )}
 
-        {/* 로그 */}
-        <div className="bg-white rounded-lg shadow p-4">
-          <h3 className="font-bold mb-3 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-orange-500" />
-            작업 로그
-          </h3>
-          <div className="h-48 overflow-y-auto space-y-1 text-sm">
-            {logs.map((log, idx) => (
-              <div key={idx} className={`flex gap-2 ${
-                log.type === 'error' ? 'text-red-600' : 
-                log.type === 'success' ? 'text-green-600' : 
-                'text-gray-600'
-              }`}>
-                <span className="text-gray-400">{log.time}</span>
-                <span>{log.message}</span>
-              </div>
-            ))}
-            {logs.length === 0 && (
-              <div className="text-gray-400 text-center py-8">작업 로그가 표시됩니다</div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+                  {activeTab === 'custom' && (
+                    <div className="p-6">
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                        <h3 className="font-bold text-blue-900 mb-3">➕ 새 커스텀 세그먼트 만들기</h3>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div className="col-span-2">
+                            <label className="block text-sm font-medium mb-1">세그먼트 이름</label>
+                            <input
+                              type="text"
+                              value={newSegment.name}
+                              onChange={(e) => setNewSegment({...newSegment, name: e.target.value})}
+                              placeholder="예: 30일_미구매_쿠폰보유자"
+                              className="w-full border rounded px-3 py-2"
+                            />
+                          </div>
 
-export default CRMDashboard;
-  </script>
-</body>
-</html>
+                          <div>
+                            <label className="block text-sm font-medium mb-1">가입일 (일)</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                placeholder="최소"
+                                value={newSegment.conditions.signupDaysMin}
+                                onChange={(e) => setNewSegment({...newSegment, conditions: {...newSegment.conditions, signupDaysMin: e.target.value}})}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                              />
+                              <input
+                                type="number"
+                                placeholder="최대"
+                                value={newSegment.conditions.signupDaysMax}
+                                onChange={(e) => setNewSegment({...newSegment, conditions: {...newSegment.conditions, signupDaysMax: e.target.value}})}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium mb-1">누적구매액</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                placeholder="최소"
+                                value={newSegment.conditions.totalAmountMin}
+                                onChange={(e) => setNewSegment({...newSegment, conditions: {...newSegment.conditions, totalAmountMin: e.target.value}})}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                              />
+                              <input
+                                type="number"
+                                placeholder="최대"
+                                value={newSegment.conditions.totalAmountMax}
+                                onChange={(e) => setNewSegment({...newSegment, conditions: {...newSegment.conditions, totalAmountMax: e.target.value}})}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-sm font-medium mb-1">주문횟수</label>
+                            <div className="flex gap-2">
+                              <input
+                                type="number"
+                                placeholder="최소"
+                                value={newSegment.conditions.orderCountMin}
+                                onChange={(e) => setNewSegment({...newSegment, conditions: {...newSeg
