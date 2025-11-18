@@ -1,5 +1,5 @@
 // ========================================
-// 🎯 기본 세그먼트 정의 (14개)
+// 🎯 기본 세그먼트 정의 (수정 용이!)
 // ========================================
 
 export const PREDEFINED_SEGMENTS = {
@@ -86,66 +86,13 @@ export const PREDEFINED_SEGMENTS = {
   ]
 };
 
-// ========================================
-// 🔌 Supabase 설정
-// ========================================
-
 export const SUPABASE_CONFIG = {
   URL: 'https://htcxkbijmiptoubmkhkm.supabase.co',
-  KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0Y3hrYmlqbWlwdG91Ym1raGttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MjA2OTcsImV4cCI6MjA3ODk5NjY5N30.JGTUpL5spuYEvXdI3u3f3qbo6n2ztGSVwHrZijB4i8'
+  KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0Y3hyYmlqbWlwdG91Ym1raGttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MjA2OTcsImV4cCI6MjA3ODk5NjY5N30.JGTUpL5spuYEvXdI3u3f3qbo6n2ztGSVwHrZijB4i8'
 };
-
-// ========================================
-// 📱 Notifly 설정
-// ========================================
-
-export const NOTIFLY_CONFIG = {
-  PROJECT_ID: 'f2e198e2448959908fe4f8e540f4057f',
-  ACCESS_KEY: '52c258da1c175ef4b6df1831ab2e1b1b',
-  SECRET_KEY: 'b7GU4b$TM_V*'
-};
-
-// ========================================
-// 🌐 API 엔드포인트
-// ========================================
-
-export const API_ENDPOINTS = {
-  CAMPAIGN_SEND: '/api/notifly-send-campaign',
-  UPDATE_PROPERTIES: '/api/notifly-update-properties',
-  NOTIFLY_AUTH: 'https://api.notifly.tech/authenticate',
-  NOTIFLY_PROPERTIES: 'https://api.notifly.tech/set-user-properties'
-};
-
-// ========================================
-// ⚙️ 배치 처리 설정
-// ========================================
 
 export const BATCH_SIZES = {
   CAMPAIGN: 1000,
   PROPERTIES: 500,
   ANALYSIS: 10000
-};
-
-// ========================================
-// 📋 커스텀 세그먼트 템플릿
-// ========================================
-
-export const CUSTOM_SEGMENT_TEMPLATE = {
-  name: '',
-  conditions: {
-    signupDaysMin: '',
-    signupDaysMax: '',
-    totalAmountMin: '',
-    totalAmountMax: '',
-    orderCountMin: '',
-    orderCountMax: '',
-    grade: '',
-    avgCycleMin: '',
-    avgCycleMax: '',
-    daysSinceOrderMin: '',
-    daysSinceOrderMax: '',
-    couponCountMin: '',
-    couponCountMax: '',
-    martEnabled: true
-  }
 };
