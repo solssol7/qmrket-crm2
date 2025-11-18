@@ -1,0 +1,21 @@
+{
+  "name": "qmarket-crm",
+  "version": "1.0.0",
+  "description": "큐마켓 CRM 세그먼트 대시보드",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build needed'"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {},
+  "keywords": [
+    "crm",
+    "notifly",
+    "qmarket"
+  ],
+  "author": "QMarket Team",
+  "license": "MIT"
+}

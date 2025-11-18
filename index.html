@@ -1,0 +1,577 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>큐마켓 CRM</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/papaparse@5/papaparse.min.js"></script>
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    import React, { useState, useEffect } from 'react';
+import { Upload, Download, Send, Users, AlertCircle, CheckCircle, Loader, RefreshCw } from 'lucide-react';
+import Papa from 'papaparse';
+import { createClient } from '@supabase/supabase-js';
+
+// Supabase 설정
+const supabase = createClient(
+  'https://htcxkbijmiptoubmkhkm.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0Y3hrYmlqbWlwdG91Ym1raGttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM0MjA2OTcsImV4cCI6MjA3ODk5NjY5N30.JGTUpL5spuYEvXdI3u3f3qboS6n2ztGSVwHrZijB4i8'
+);
+
+const NOTIFLY_CONFIG = {
+  PROJECT_ID: 'f2e198e2448959908fe4f8e540f4057f',
+};
+
+const CRMDashboard = () => {
+  const [segments, setSegments] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [uploadProgress, setUploadProgress] = useState({ users: 0, orders: 0, coupons: 0 });
+  const [dbStats, setDbStats] = useState({ users: 0, orders: 0, coupons: 0 });
+  const [selectedSegment, setSelectedSegment] = useState(null);
+  const [campaignId, setCampaignId] = useState('');
+
+  const addLog = (message, type = 'info') => {
+    setLogs(prev => [...prev, { message, type, time: new Date().toLocaleTimeString() }]);
+  };
+
+  // DB 통계 조회
+  const loadDbStats = async () => {
+    try {
+      const [usersCount, ordersCount, couponsCount] = await Promise.all([
+        supabase.from('users').select('*', { count: 'exact', head: true }),
+        supabase.from('orders').select('*', { count: 'exact', head: true }),
+        supabase.from('coupons').select('*', { count: 'exact', head: true })
+      ]);
+
+      setDbStats({
+        users: usersCount.count || 0,
+        orders: ordersCount.count || 0,
+        coupons: couponsCount.count || 0
+      });
+    } catch (error) {
+      addLog(`DB 통계 조회 실패: ${error.message}`, 'error');
+    }
+  };
+
+  useEffect(() => {
+    loadDbStats();
+  }, []);
+
+  // agree 필드 boolean 변환 헬퍼
+  const parseAgree = (value) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return false; // null이나 빈 값은 false로 처리
+  };
+
+  // CSV 업로드 → Supabase 저장
+  const handleFileUpload = async (file, type) => {
+    Papa.parse(file, {
+      header: true,
+      dynamicTyping: true,
+      skipEmptyLines: true,
+      complete: async (result) => {
+        const cleanData = result.data.map(row => {
+          const cleaned = {};
+          Object.keys(row).forEach(key => {
+            cleaned[key.trim()] = row[key];
+          });
+          return cleaned;
+        });
+
+        addLog(`${type} CSV 읽기 완료: ${cleanData.length}행`, 'info');
+
+        try {
+          setLoading(true);
+          
+          if (type === 'users') {
+            // 기존 데이터 삭제
+            await supabase.from('users').delete().neq('user_id', 0);
+            
+            // 새 데이터 삽입 (500개씩 배치)
+            const batchSize = 500;
+            for (let i = 0; i < cleanData.length; i += batchSize) {
+              const batch = cleanData.slice(i, i + batchSize);
+              const { error } = await supabase.from('users').insert(batch);
+              if (error) throw error;
+              setUploadProgress(prev => ({ ...prev, users: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
+            }
+            addLog(`✓ users 테이블에 ${cleanData.length}행 저장 완료`, 'success');
+            
+          } else if (type === 'orders') {
+            await supabase.from('orders').delete().neq('user_id', 0);
+            
+            const batchSize = 500;
+            for (let i = 0; i < cleanData.length; i += batchSize) {
+              const batch = cleanData.slice(i, i + batchSize);
+              const { error } = await supabase.from('orders').insert(batch);
+              if (error) throw error;
+              setUploadProgress(prev => ({ ...prev, orders: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
+            }
+            addLog(`✓ orders 테이블에 ${cleanData.length}행 저장 완료`, 'success');
+            
+          } else if (type === 'coupons') {
+            await supabase.from('coupons').delete().neq('user_id', 0);
+            
+            const batchSize = 500;
+            for (let i = 0; i < cleanData.length; i += batchSize) {
+              const batch = cleanData.slice(i, i + batchSize);
+              const { error } = await supabase.from('coupons').insert(batch);
+              if (error) throw error;
+              setUploadProgress(prev => ({ ...prev, coupons: Math.min(100, ((i + batchSize) / cleanData.length) * 100) }));
+            }
+            addLog(`✓ coupons 테이블에 ${cleanData.length}행 저장 완료`, 'success');
+          }
+
+          await loadDbStats();
+        } catch (error) {
+          addLog(`DB 저장 실패: ${error.message}`, 'error');
+        } finally {
+          setLoading(false);
+        }
+      },
+      error: (error) => {
+        addLog(`CSV 읽기 실패: ${error.message}`, 'error');
+      }
+    });
+  };
+
+  // Supabase에서 데이터 조회 & 세그먼트 분석
+  const analyzeSegments = async () => {
+    setLoading(true);
+    addLog('DB에서 데이터 조회 중...', 'info');
+
+    try {
+      // 모든 데이터 조회
+      const [usersRes, ordersRes, couponsRes] = await Promise.all([
+        supabase.from('users').select('*'),
+        supabase.from('orders').select('*'),
+        supabase.from('coupons').select('*')
+      ]);
+
+      if (usersRes.error) throw usersRes.error;
+      if (ordersRes.error) throw ordersRes.error;
+      if (couponsRes.error) throw couponsRes.error;
+
+      const users = usersRes.data;
+      const orders = ordersRes.data;
+      const coupons = couponsRes.data;
+
+      addLog(`데이터 조회 완료: users ${users.length}명, orders ${orders.length}건`, 'info');
+
+      // 주문 데이터 집계
+      const orderStats = {};
+      orders.forEach(order => {
+        const uid = order.user_id;
+        if (!orderStats[uid]) {
+          orderStats[uid] = { orders: [], totalAmount: 0, lastOrderDate: null };
+        }
+        orderStats[uid].orders.push(order);
+        orderStats[uid].totalAmount += (order.real_payment || 0) + (order.qmoney_payment || 0);
+        
+        const orderDate = new Date(order.order_date);
+        if (!orderStats[uid].lastOrderDate || orderDate > orderStats[uid].lastOrderDate) {
+          orderStats[uid].lastOrderDate = orderDate;
+        }
+      });
+
+      // 쿠폰 데이터 매핑
+      const couponMap = {};
+      coupons.forEach(c => {
+        couponMap[c.user_id] = c.valid_coupon_count || 0;
+      });
+
+      const now = new Date();
+      const segments = {
+        '고가치_휴면': [],
+        '중가치_휴면': [],
+        '저가치_휴면': [],
+        'VIP': [],
+        '충성고객': [],
+        '일반활성': [],
+        '신규유저': [],
+        '쿠폰미사용_활성': []
+      };
+
+      users.forEach(user => {
+        const uid = user.user_id;
+        const stats = orderStats[uid] || { orders: [], totalAmount: 0, lastOrderDate: null };
+        const couponCount = couponMap[uid] || 0;
+        const signupDate = new Date(user.signup_date);
+        const daysSinceSignup = (now - signupDate) / (1000 * 60 * 60 * 24);
+        const daysSinceOrder = stats.lastOrderDate ? (now - stats.lastOrderDate) / (1000 * 60 * 60 * 24) : 999;
+        
+        const threeMonthsAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+        const recentOrders = stats.orders.filter(o => new Date(o.order_date) >= threeMonthsAgo);
+        const recentAmount = recentOrders.reduce((sum, o) => sum + (o.real_payment || 0) + (o.qmoney_payment || 0), 0);
+        const avgOrderAmount = recentOrders.length > 0 ? recentAmount / recentOrders.length : 0;
+
+        const enriched = {
+          ...user,
+          총주문횟수: stats.orders.length,
+          누적구매액: stats.totalAmount,
+          최근주문일: stats.lastOrderDate ? stats.lastOrderDate.toISOString().split('T')[0] : 'N/A',
+          미주문일수: Math.floor(daysSinceOrder),
+          최근3개월주문: recentOrders.length,
+          최근3개월구매액: recentAmount,
+          평균주문금액: Math.floor(avgOrderAmount),
+          보유쿠폰: couponCount,
+          // 발송 가능 채널
+          푸시가능: parseAgree(user.agree_app_push),
+          SMS가능: parseAgree(user.agree_sms),
+          알림톡가능: parseAgree(user.agree_alim_talk)
+        };
+
+        // MECE 세그먼트 분류
+        if (daysSinceSignup <= 30 && stats.orders.length <= 1) {
+          segments['신규유저'].push({ ...enriched, 세그먼트: '신규유저' });
+        } else if (daysSinceOrder >= 60) {
+          if (stats.totalAmount >= 200000 && couponCount >= 3) {
+            segments['고가치_휴면'].push({ ...enriched, 세그먼트: '고가치_휴면' });
+          } else if (stats.totalAmount >= 100000 && couponCount >= 1) {
+            segments['중가치_휴면'].push({ ...enriched, 세그먼트: '중가치_휴면' });
+          } else {
+            segments['저가치_휴면'].push({ ...enriched, 세그먼트: '저가치_휴면' });
+          }
+        } else {
+          if (recentOrders.length >= 5 && avgOrderAmount >= 50000) {
+            segments['VIP'].push({ ...enriched, 세그먼트: 'VIP' });
+          } else if (recentOrders.length >= 3) {
+            segments['충성고객'].push({ ...enriched, 세그먼트: '충성고객' });
+          } else {
+            segments['일반활성'].push({ ...enriched, 세그먼트: '일반활성' });
+          }
+
+          if (couponCount >= 3 && recentOrders.every(o => !o.coupon_payment || o.coupon_payment === 0)) {
+            segments['쿠폰미사용_활성'].push({ ...enriched, 세그먼트: '쿠폰미사용_활성' });
+          }
+        }
+      });
+
+      setSegments(segments);
+      addLog('세그먼트 분석 완료!', 'success');
+    } catch (error) {
+      addLog(`분석 실패: ${error.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // CSV 다운로드
+  const downloadCSV = (segmentName) => {
+    if (!segments || !segments[segmentName]) return;
+
+    const data = segments[segmentName];
+    const csv = Papa.unparse(data);
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${segmentName}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    addLog(`${segmentName} CSV 다운로드 (${data.length}명)`, 'success');
+  };
+
+  // Notifly 유저 속성 업데이트
+  const updateUserProperties = async (segmentName) => {
+    if (!segments || !segments[segmentName]) return;
+
+    const users = segments[segmentName];
+    addLog(`${segmentName} 유저 속성 업데이트 시작 (${users.length}명)`, 'info');
+
+    try {
+      // Vercel Serverless Function 호출
+      const response = await fetch('/api/notifly-update-properties', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: NOTIFLY_CONFIG.PROJECT_ID,
+          users: users.map(user => ({
+            userId: String(user.user_id),
+            properties: {
+              $phone_number: user.phone,
+              세그먼트: user.세그먼트,
+              등급: user.grade_name,
+              마트: user.mart_name,
+              총주문횟수: user.총주문횟수,
+              누적구매액: user.누적구매액,
+              최근주문일: user.최근주문일,
+              미주문일수: user.미주문일수,
+              보유쿠폰: user.보유쿠폰
+            }
+          }))
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        addLog(`✓ ${segmentName} 속성 업데이트 완료`, 'success');
+      } else {
+        addLog(`속성 업데이트 실패: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      addLog(`속성 업데이트 실패: ${error.message}`, 'error');
+    }
+  };
+
+  // Notifly 캠페인 발송
+  const sendCampaign = async (segmentName) => {
+    if (!segments || !segments[segmentName] || !campaignId) {
+      addLog('캠페인 ID를 입력해주세요', 'error');
+      return;
+    }
+
+    // 발송 가능 유저만 필터링 (푸시 동의자)
+    const users = segments[segmentName].filter(u => u.푸시가능);
+    
+    if (users.length === 0) {
+      addLog('발송 가능한 유저가 없습니다 (푸시 동의 필요)', 'error');
+      return;
+    }
+
+    addLog(`${segmentName} 캠페인 발송 시작 (${users.length}명)`, 'info');
+
+    try {
+      const response = await fetch('/api/notifly-send-campaign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: NOTIFLY_CONFIG.PROJECT_ID,
+          campaignId: campaignId,
+          users: users.map(user => ({
+            userId: String(user.user_id),
+            eventParams: {
+              닉네임: user.nickname,
+              보유쿠폰: user.보유쿠폰,
+              미주문일수: user.미주문일수
+            }
+          }))
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        addLog(`✓ ${segmentName} 캠페인 발송 완료`, 'success');
+      } else {
+        addLog(`캠페인 발송 실패: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      addLog(`캠페인 발송 실패: ${error.message}`, 'error');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-orange-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* 헤더 */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <h1 className="text-3xl font-bold text-orange-600 mb-2">큐마켓 CRM 세그먼트 대시보드</h1>
+          <p className="text-gray-600">Supabase + Vercel 연동 | 실시간 동기화</p>
+        </div>
+
+        {/* DB 통계 */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500 mb-1">DB: Users</div>
+            <div className="text-2xl font-bold text-orange-600">{dbStats.users.toLocaleString()}명</div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500 mb-1">DB: Orders</div>
+            <div className="text-2xl font-bold text-blue-600">{dbStats.orders.toLocaleString()}건</div>
+          </div>
+          <div className="bg-white rounded-lg shadow p-4">
+            <div className="text-sm text-gray-500 mb-1">DB: Coupons</div>
+            <div className="text-2xl font-bold text-green-600">{dbStats.coupons.toLocaleString()}명</div>
+          </div>
+        </div>
+
+        {/* CSV 업로드 */}
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-lg shadow p-4">
+            <label className="flex flex-col items-center cursor-pointer">
+              <Upload className="w-8 h-8 text-orange-500 mb-2" />
+              <span className="text-sm font-medium mb-2">기본정보 CSV</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => handleFileUpload(e.target.files[0], 'users')}
+                className="hidden"
+                disabled={loading}
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                {uploadProgress.users > 0 ? `${uploadProgress.users.toFixed(0)}%` : '클릭하여 업로드'}
+              </div>
+            </label>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4">
+            <label className="flex flex-col items-center cursor-pointer">
+              <Upload className="w-8 h-8 text-orange-500 mb-2" />
+              <span className="text-sm font-medium mb-2">주문정보 CSV</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => handleFileUpload(e.target.files[0], 'orders')}
+                className="hidden"
+                disabled={loading}
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                {uploadProgress.orders > 0 ? `${uploadProgress.orders.toFixed(0)}%` : '클릭하여 업로드'}
+              </div>
+            </label>
+          </div>
+
+          <div className="bg-white rounded-lg shadow p-4">
+            <label className="flex flex-col items-center cursor-pointer">
+              <Upload className="w-8 h-8 text-orange-500 mb-2" />
+              <span className="text-sm font-medium mb-2">쿠폰정보 CSV</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={(e) => handleFileUpload(e.target.files[0], 'coupons')}
+                className="hidden"
+                disabled={loading}
+              />
+              <div className="text-xs text-gray-400 mt-1">
+                {uploadProgress.coupons > 0 ? `${uploadProgress.coupons.toFixed(0)}%` : '클릭하여 업로드'}
+              </div>
+            </label>
+          </div>
+        </div>
+
+        {/* 분석 버튼 */}
+        <div className="flex gap-4 mb-6">
+          <button
+            onClick={analyzeSegments}
+            disabled={loading || dbStats.users === 0}
+            className="flex-1 bg-orange-500 text-white py-3 rounded-lg font-bold hover:bg-orange-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-5 h-5 animate-spin" />
+                분석 중...
+              </>
+            ) : (
+              <>
+                <Users className="w-5 h-5" />
+                세그먼트 분석 시작
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={loadDbStats}
+            className="bg-blue-500 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-600 flex items-center gap-2"
+          >
+            <RefreshCw className="w-5 h-5" />
+            새로고침
+          </button>
+        </div>
+
+        {/* 세그먼트 결과 */}
+        {segments && (
+          <div className="space-y-4 mb-6">
+            {Object.entries(segments).map(([name, users]) => {
+              const pushUsers = users.filter(u => u.푸시가능).length;
+              const smsUsers = users.filter(u => u.SMS가능).length;
+              const alimtalkUsers = users.filter(u => u.알림톡가능).length;
+
+              return (
+                <div key={name} className="bg-white rounded-lg shadow p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="font-bold text-lg">
+                        {name.replace('_', ' ')}
+                        <span className="ml-2 text-orange-600">({users.length}명)</span>
+                      </h3>
+                      <div className="text-xs text-gray-500 mt-1">
+                        푸시: {pushUsers}명 | SMS: {smsUsers}명 | 알림톡: {alimtalkUsers}명
+                      </div>
+                    </div>
+                    <Users className="w-5 h-5 text-gray-400" />
+                  </div>
+
+                  {users.length > 0 && (
+                    <div className="grid grid-cols-4 gap-2">
+                      <button
+                        onClick={() => downloadCSV(name)}
+                        className="bg-green-500 text-white py-2 rounded hover:bg-green-600 flex items-center justify-center gap-2 text-sm"
+                      >
+                        <Download className="w-4 h-4" />
+                        CSV
+                      </button>
+
+                      <button
+                        onClick={() => updateUserProperties(name)}
+                        className="bg-blue-500 text-white py-2 rounded hover:bg-blue-600 flex items-center justify-center gap-2 text-sm"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        속성 업데이트
+                      </button>
+
+                      <input
+                        type="text"
+                        placeholder="캠페인 ID"
+                        value={selectedSegment === name ? campaignId : ''}
+                        onChange={(e) => {
+                          setSelectedSegment(name);
+                          setCampaignId(e.target.value);
+                        }}
+                        className="border rounded px-2 py-1 text-sm"
+                      />
+
+                      <button
+                        onClick={() => sendCampaign(name)}
+                        disabled={!campaignId || selectedSegment !== name}
+                        className="bg-purple-500 text-white py-2 rounded hover:bg-purple-600 disabled:bg-gray-300 flex items-center justify-center gap-2 text-sm"
+                      >
+                        <Send className="w-4 h-4" />
+                        발송
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 로그 */}
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-bold mb-3 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-orange-500" />
+            작업 로그
+          </h3>
+          <div className="h-48 overflow-y-auto space-y-1 text-sm">
+            {logs.map((log, idx) => (
+              <div key={idx} className={`flex gap-2 ${
+                log.type === 'error' ? 'text-red-600' : 
+                log.type === 'success' ? 'text-green-600' : 
+                'text-gray-600'
+              }`}>
+                <span className="text-gray-400">{log.time}</span>
+                <span>{log.message}</span>
+              </div>
+            ))}
+            {logs.length === 0 && (
+              <div className="text-gray-400 text-center py-8">작업 로그가 표시됩니다</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default CRMDashboard;
+  </script>
+</body>
+</html>
